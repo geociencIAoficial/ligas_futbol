@@ -11,13 +11,15 @@ Wikipedia lo nombra distinto, agrega otro patrón al final de la línea en LIGAS
 from __future__ import annotations
 
 import json
+import re
 import time
 from datetime import date, datetime, timezone
 
 import selecciones as S
 
 # nombre | país | confederación | A = temporada partida (2026–27), C = año calendario | patrones
-# {t} temporada, {y} año, {s} Apertura/Clausura. Varios patrones se separan con ;
+# {t} temporada (2026–27), {th} con guion (2026-27), {y} año, {s} Apertura/Clausura.
+# Con prefijo es: la página es de Wikipedia en español. Varios patrones se separan con ;
 LIGAS_TXT = """
 Premier League|Inglaterra|UEFA|A|{t} Premier League
 La Liga|España|UEFA|A|{t} La Liga
@@ -44,32 +46,32 @@ Russian Premier League|Rusia|UEFA|A|{t} Russian Premier League
 Argentine Primera División|Argentina|CONMEBOL|C|{t} Argentine Primera División;{t} Liga Profesional de Fútbol
 Brasileirão Série A|Brasil|CONMEBOL|C|{t} Campeonato Brasileiro Série A
 Categoría Primera A|Colombia|CONMEBOL|C|{t} Categoría Primera A season;{t} Categoría Primera A
-Chilean Primera División|Chile|CONMEBOL|C|{t} Chilean Primera División
-Uruguayan Primera División|Uruguay|CONMEBOL|C|{t} Uruguayan Primera División
-Paraguayan Primera División|Paraguay|CONMEBOL|C|{t} Paraguayan Primera División
-Ecuadorian Serie A|Ecuador|CONMEBOL|C|{t} Ecuadorian Serie A
+Chilean Primera División|Chile|CONMEBOL|C|es:Liga de Primera {y};{t} Chilean Primera División
+Uruguayan Primera División|Uruguay|CONMEBOL|C|es:Campeonato Uruguayo de Primera División {y};{t} Uruguayan Primera División
+Paraguayan Primera División|Paraguay|CONMEBOL|C|es:Torneo Clausura {y} (Paraguay);es:Torneo Apertura {y} (Paraguay);{t} Paraguayan Primera División
+Ecuadorian Serie A|Ecuador|CONMEBOL|C|es:Serie A de Ecuador {y};{t} Ecuadorian Serie A
 Liga 1 (Perú)|Perú|CONMEBOL|C|{t} Liga 1 (Peru);{t} Peruvian Primera División
 Liga MX|México|CONCACAF|A|{t} Liga MX season;{t} Liga MX
 MLS|Estados Unidos y Canadá|CONCACAF|C|{t} Major League Soccer season
 Canadian Premier League|Canadá|CONCACAF|C|{t} Canadian Premier League season
-Liga FPD|Costa Rica|CONCACAF|A|{t} Liga FPD;{t} Liga FPD season
-Liga Panameña|Panamá|CONCACAF|A|{t} Liga Panameña de Fútbol season;{t} Liga Panameña de Fútbol
-Liga Nacional (Honduras)|Honduras|CONCACAF|A|{t} Honduran Liga Nacional;{t} Liga Nacional de Honduras
-Liga Nacional (Guatemala)|Guatemala|CONCACAF|A|{t} Liga Nacional de Guatemala;{t} Liga Nacional de Fútbol de Guatemala
+Liga FPD|Costa Rica|CONCACAF|A|es:Campeonato de {s} {y} (Costa Rica);{t} Liga FPD;{t} Liga FPD season
+Liga Panameña|Panamá|CONCACAF|A|es:Torneo Clausura {y} (Panamá);es:Torneo Apertura {y} (Panamá);{t} Liga Panameña de Fútbol season;{t} Liga Panameña de Fútbol
+Liga Nacional (Honduras)|Honduras|CONCACAF|A|es:Torneo {s} {y} (Honduras);{t} Honduran Liga Nacional;{t} Liga Nacional de Honduras
+Liga Nacional (Guatemala)|Guatemala|CONCACAF|A|es:Torneo {s} {y} (Guatemala);{t} Liga Nacional de Guatemala;{t} Liga Nacional de Fútbol de Guatemala
 Primera División (El Salvador)|El Salvador|CONCACAF|A|{t} Primera División de El Salvador
 Liga Primera (Nicaragua)|Nicaragua|CONCACAF|A|{t} Liga Primera;{t} Liga Primera de Nicaragua
 Egyptian Premier League|Egipto|CAF|A|{t} Egyptian Premier League
 Botola Pro|Marruecos|CAF|A|{t} Botola Pro;{t} Botola
 Tunisian Ligue 1|Túnez|CAF|A|{t} Tunisian Ligue Professionnelle 1
 Algerian Ligue 1|Argelia|CAF|A|{t} Algerian Ligue Professionnelle 1
-South African Premiership|Sudáfrica|CAF|A|{t} South African Premier Division;{t} Premier Soccer League
+South African Premiership|Sudáfrica|CAF|A|es:Premier Soccer League {th};{t} South African Premier Division;{t} Premier Soccer League
 Saudi Pro League|Arabia Saudita|AFC|A|{t} Saudi Pro League
 J1 League|Japón|AFC|A|{t} J1 League;{y} J1 League
 K League 1|Corea del Sur|AFC|C|{t} K League 1
 Chinese Super League|China|AFC|C|{t} Chinese Super League
 Persian Gulf Pro League|Irán|AFC|A|{t} Persian Gulf Pro League
-UAE Pro League|Emiratos Árabes|AFC|A|{t} UAE Pro League
-Qatar Stars League|Catar|AFC|A|{t} Qatar Stars League
+UAE Pro League|Emiratos Árabes|AFC|A|es:UAE Pro League {th};{t} UAE Pro League
+Qatar Stars League|Catar|AFC|A|es:Liga de fútbol de Catar {th};{t} Qatar Stars League
 A-League Men|Australia|AFC|A|{t} A-League Men
 """
 LIGAS = [(l[0], l[1], l[2], l[3], l[4].split(";"))
@@ -85,9 +87,13 @@ LIGAS_RONDAS = {"Liga MX": 1, "Liga FPD": 2, "Liga Panameña": 2, "Liga Nacional
                 "Liga Nacional (Guatemala)": 2, "Primera División (El Salvador)": 2,
                 "Liga Primera (Nicaragua)": 2}
 
-COLS = {"pj": ("pld", "mp", "gp"), "g": ("w",), "e": ("d", "t"), "p": ("l",),
-        "gf": ("gf", "f"), "gc": ("ga", "a"), "pts": ("pts", "points"),
-        "equipo": ("team", "club")}
+COLS = {"pj": ("pld", "mp", "gp", "pj", "j"), "g": ("w", "pg", "g"), "e": ("d", "t", "pe", "e"),
+        "p": ("l", "pp"), "gf": ("gf", "f"), "gc": ("ga", "gc", "a", "c"),
+        "pts": ("pts", "points", "puntos", "pt"), "equipo": ("team", "club", "equipo")}
+
+# Páginas con varias tablas: la que se prefiere por el título de su sección (regex sobre texto sin acentos)
+LIGAS_PREFER = {"Uruguayan Primera División": "anual|acumulad", "Ecuadorian Serie A": "acumulad|general"}
+EXCLUIR_ES = "descenso|promedi|cociente"        # tablas auxiliares de páginas en español
 
 
 def candidatos(tipo: str, patrones: list[str], hoy: date) -> list[str]:
@@ -96,17 +102,19 @@ def candidatos(tipo: str, patrones: list[str], hoy: date) -> list[str]:
     if tipo == "A":
         ts.append(str(hoy.year))          # respaldo: ligas que pasan a año calendario
     s = "Apertura" if hoy.month >= 7 else "Clausura"
-    return [p.format(t=t, y=hoy.year, s=s) for t in ts for p in patrones]
+    return list(dict.fromkeys(p.format(t=t, th=t.replace("–", "-"), y=hoy.year, s=s)
+                              for t in ts for p in patrones))
 
 
-def parsear_posiciones(html: str, rondas: int | None = None) -> list[dict]:
+def parsear_posiciones(html: str, rondas: int | None = None, prefer: str | None = None,
+                       excluir: str | None = None) -> list[dict]:
     """Filas de la tabla de posiciones; ignora el resto de tablas del artículo.
 
-    rondas: para ligas con dos torneos por artículo (Liga MX = 1 vuelta). Se usa el
-    torneo más reciente y se descartan las tablas acumuladas (suman más de
-    rondas * (equipos - 1) partidos).
+    rondas: ligas con dos torneos por artículo (Liga MX = 1 vuelta). Se usa el torneo más
+    reciente y se descartan las tablas acumuladas.
+    prefer / excluir: expresiones regulares sobre el título de la sección de cada tabla.
     """
-    filas, pos = [], {}
+    tablas = []
     for t in S._raiz(html).find_all("table"):
         tr0 = t.find("tr")
         if tr0 is None:
@@ -114,6 +122,10 @@ def parsear_posiciones(html: str, rondas: int | None = None) -> list[dict]:
         cab = [(S.norm(S._texto(c)).split() or [""])[0] for c in tr0.find_all(["th", "td"])]
         idx = {k: next((i for i, h in enumerate(cab) if h in v), None) for k, v in COLS.items()}
         if None in idx.values():
+            continue
+        h = t.find_previous(["h2", "h3", "h4", "h5"])
+        enc = S.norm(S._texto(h)) if h else ""
+        if excluir and re.search(excluir, enc):
             continue
         tabla = []
         for tr in t.find_all("tr")[1:]:
@@ -127,8 +139,14 @@ def parsear_posiciones(html: str, rondas: int | None = None) -> list[dict]:
                 tabla.append({"equipo": nombre, "wiki": S.titulo(a) if a else None, **num})
         if rondas and any(f["pj"] > rondas * (len(tabla) - 1) for f in tabla):
             continue                                  # tabla acumulada, no de un torneo
+        tablas.append((enc, tabla))
+    if prefer:
+        elegidas = [t for t in tablas if re.search(prefer, t[0])][:1]
+        tablas = elegidas or tablas
+    filas, pos = [], {}
+    for _, tabla in tablas:
         for fila in tabla:
-            n = fila["equipo"]
+            n = fila["wiki"] or fila["equipo"]
             if n in pos and not (rondas and fila["pj"]):
                 continue
             if n in pos:
@@ -139,11 +157,26 @@ def parsear_posiciones(html: str, rondas: int | None = None) -> list[dict]:
     return filas
 
 
+def html_pagina(pagina: str, refrescar: bool = False) -> str:
+    """Con prefijo es: usa la API de Wikipedia en español."""
+    if not pagina.startswith("es:"):
+        return S.wiki_html(pagina, refrescar)
+    api = S.WIKI_API
+    S.WIKI_API = "https://es.wikipedia.org/w/api.php"
+    try:
+        return S.wiki_html(pagina[3:], refrescar)
+    finally:
+        S.WIKI_API = api
+
+
 MALOS = ("femenil", "women", "segunda", "ascenso", "cup", "copa", "youth", "reserve", "u-", "u20", "u21")
 
 
 def buscar_titulos(tipo, pats, hoy):
     """Respaldo: busca en Wikipedia artículos de la temporada que se parezcan a los patrones."""
+    pats = [p for p in pats if not p.startswith("es:")]
+    if not pats:
+        return []
     ts = {str(hoy.year), f"{hoy.year if hoy.month >= 7 else hoy.year - 1}–"}
     bases = {p.replace("{t}", "").replace("{y}", "").replace("{s}", "").replace(" season", "").strip().lower()
              for p in pats}
@@ -164,6 +197,29 @@ def buscar_titulos(tipo, pats, hoy):
     return out
 
 
+def cargar_manuales(con) -> set[str]:
+    """Ligas que Wikipedia aún no tiene: se llenan a mano en datos_manuales.csv."""
+    import csv
+    ruta = S.BASE_DIR / "datos_manuales.csv"
+    if not ruta.exists():
+        return set()
+    por_liga: dict[str, list] = {}
+    for r in csv.DictReader(ruta.open(encoding="utf-8-sig")):
+        try:
+            g, e = int(r["g"]), int(r["e"])
+            pts = int(r["pts"]) if (r.get("pts") or "").strip() else 3 * g + e
+            fila = (r["liga"].strip(), "datos_manuales.csv", r["equipo"].strip(), None, int(r["pj"]), g, e,
+                    int(r["p"]), int(r["gf"]), int(r["gc"]), pts, S.ahora())
+        except (KeyError, ValueError, AttributeError):
+            continue
+        por_liga.setdefault(fila[0], []).append(fila)
+    for liga, filas in por_liga.items():
+        con.execute("DELETE FROM tabla_liga WHERE liga=?", (liga,))
+        con.executemany("INSERT OR REPLACE INTO tabla_liga VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", filas)
+        print(f"  {liga}: {len(filas)} equipos (datos_manuales.csv)")
+    return set(por_liga)
+
+
 def cmd_tablas(args):
     hoy = date.today()
     pedidas = {S.norm(x) for x in (args.ligas or [])}
@@ -182,13 +238,14 @@ def cmd_tablas(args):
                     continue
                 vistos.add(pagina)
                 try:
-                    html = S.wiki_html(pagina, args.refrescar)
+                    html = html_pagina(pagina, args.refrescar)
                 except RuntimeError:
                     motivos.append(f"{pagina}: no existe")
                     time.sleep(S.WIKI_PAUSA_S)
                 else:
-                    filas = parsear_posiciones(html, LIGAS_RONDAS.get(nombre))
-                    if filas:
+                    filas = parsear_posiciones(html, LIGAS_RONDAS.get(nombre), LIGAS_PREFER.get(nombre),
+                                               EXCLUIR_ES if pagina.startswith("es:") else None)
+                    if filas and any(f["pj"] for f in filas):
                         con.execute("DELETE FROM tabla_liga WHERE liga=?", (nombre,))
                         con.executemany("INSERT OR REPLACE INTO tabla_liga VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                                         [(nombre, pagina, f["equipo"], f["wiki"], f["pj"], f["g"], f["e"],
@@ -204,6 +261,8 @@ def cmd_tablas(args):
                 print(f"  {nombre}: sin tabla")
                 for m in motivos:
                     print(f"      - {m}")
+        man = cargar_manuales(con)
+        sin = [x for x in sin if x not in man]
     if sin:
         print(f"\n{len(sin)} ligas sin tabla: {', '.join(sin)}.\n"
               "Revisa arriba el motivo de cada una y ajusta su línea en LIGAS_TXT.")

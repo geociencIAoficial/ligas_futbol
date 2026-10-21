@@ -119,3 +119,15 @@ La app ya se instala desde Chrome (Instalar app) y se comporta como una app nati
 5. Pasa el `.apk` al celular y ábrelo. Android pedirá permiso para instalar desde esa fuente.
 
 Para que la app abra sin la barra de dirección de Chrome, el dominio debe servir `/.well-known/assetlinks.json` (PWABuilder lo incluye en el ZIP). Con un sitio de proyecto (`usuario.github.io/repo`) eso solo es posible si ese archivo está en la raíz de `usuario.github.io`, es decir, en un repositorio llamado `usuario.github.io`. Si no, la app funciona igual pero muestra la barra.
+
+### Ligas con página en Wikipedia en español
+
+Algunas ligas (Costa Rica, Panamá, Guatemala, Honduras, Chile, Uruguay, Paraguay, Ecuador, Sudáfrica, Emiratos y Catar) no tienen todavía artículo de la temporada en inglés, pero sí en español. En `LIGAS_TXT` esas páginas llevan el prefijo `es:`, por ejemplo `es:Campeonato de {s} {y} (Costa Rica)`, y el programa las consulta en es.wikipedia.org. Detalles:
+
+- Panamá y Paraguay prueban primero el Clausura del año y, si todavía no tiene partidos, usan el Apertura.
+- En Uruguay y Ecuador, la página trae varias tablas; el programa toma la tabla anual o acumulada de 2026 (`LIGAS_PREFER`) y descarta las de descenso y promedios.
+- Las tablas en español se reconocen por encabezados como Equipo, PJ, PG, PE, PP, GF, GC y Pts.
+
+### Si una liga sigue sin tabla
+
+`tablas` imprime, bajo cada liga sin tabla, el motivo de cada título probado: "no existe" (el título está mal o el artículo no se ha creado) o "existe pero no se reconoció la tabla" (el título está bien y falla el lector). Corrige el título en `LIGAS_TXT`. Mientras tanto puedes llenar `datos_manuales.csv` (columnas `liga,equipo,pj,g,e,p,gf,gc,pts`; `pts` puede ir vacío y se calcula como 3 por victoria más empates). El nombre de la liga debe ser exactamente el de `LIGAS_TXT`, por ejemplo `Liga Nacional (Honduras)`. Las filas del CSV reemplazan a las de Wikipedia para esa liga en cada corrida, así que bórralas cuando la liga ya salga de Wikipedia.
