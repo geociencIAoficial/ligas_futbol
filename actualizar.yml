@@ -2,7 +2,7 @@ name: Actualizar clasificación
 
 on:
   schedule:
-    - cron: "0 11 * * *"      # todos los días, 11:00 UTC (5:00 a. m. en Ciudad de México)
+    - cron: "0 */6 * * *"      # todos los días, 11:00 UTC (5:00 a. m. en Ciudad de México)
   workflow_dispatch:           # también se puede lanzar a mano desde la pestaña Actions
 
 permissions:
