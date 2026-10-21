@@ -139,6 +139,31 @@ def parsear_posiciones(html: str, rondas: int | None = None) -> list[dict]:
     return filas
 
 
+MALOS = ("femenil", "women", "segunda", "ascenso", "cup", "copa", "youth", "reserve", "u-", "u20", "u21")
+
+
+def buscar_titulos(tipo, pats, hoy):
+    """Respaldo: busca en Wikipedia artículos de la temporada que se parezcan a los patrones."""
+    ts = {str(hoy.year), f"{hoy.year if hoy.month >= 7 else hoy.year - 1}–"}
+    bases = {p.replace("{t}", "").replace("{y}", "").replace("{s}", "").replace(" season", "").strip().lower()
+             for p in pats}
+    S._wiki.headers["User-Agent"] = S.user_agent()
+    try:
+        r = S._wiki.get(S.WIKI_API, timeout=30, params={
+            "action": "query", "list": "search", "format": "json", "formatversion": 2,
+            "srlimit": 8, "srsearch": f"{hoy.year} {sorted(bases, key=len)[-1]}"}).json()
+    except Exception:
+        return []
+    time.sleep(S.WIKI_PAUSA_S)
+    out = []
+    for x in r.get("query", {}).get("search", []):
+        t = x["title"]
+        if any(t.startswith(v) for v in ts) and any(b in t.lower() for b in bases) \
+                and not any(m in t.lower() for m in MALOS):
+            out.append(t)
+    return out
+
+
 def cmd_tablas(args):
     hoy = date.today()
     pedidas = {S.norm(x) for x in (args.ligas or [])}
@@ -148,25 +173,40 @@ def cmd_tablas(args):
         for nombre, pais, conf, tipo, pats in LIGAS:
             if pedidas and S.norm(nombre) not in pedidas:
                 continue
-            for pagina in candidatos(tipo, pats, hoy):
-                try:
-                    filas = parsear_posiciones(S.wiki_html(pagina, args.refrescar), LIGAS_RONDAS.get(nombre))
-                except RuntimeError:
-                    time.sleep(S.WIKI_PAUSA_S)
+            motivos, vistos = [], set()
+            cola = candidatos(tipo, pats, hoy)
+            buscado = False
+            while cola:
+                pagina = cola.pop(0)
+                if pagina in vistos:
                     continue
-                if filas:
-                    con.execute("DELETE FROM tabla_liga WHERE liga=?", (nombre,))
-                    con.executemany("INSERT OR REPLACE INTO tabla_liga VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                                    [(nombre, pagina, f["equipo"], f["wiki"], f["pj"], f["g"], f["e"],
-                                      f["p"], f["gf"], f["gc"], f["pts"], S.ahora()) for f in filas])
-                    print(f"  {nombre}: {len(filas)} equipos ({pagina})")
-                    break
+                vistos.add(pagina)
+                try:
+                    html = S.wiki_html(pagina, args.refrescar)
+                except RuntimeError:
+                    motivos.append(f"{pagina}: no existe")
+                    time.sleep(S.WIKI_PAUSA_S)
+                else:
+                    filas = parsear_posiciones(html, LIGAS_RONDAS.get(nombre))
+                    if filas:
+                        con.execute("DELETE FROM tabla_liga WHERE liga=?", (nombre,))
+                        con.executemany("INSERT OR REPLACE INTO tabla_liga VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                                        [(nombre, pagina, f["equipo"], f["wiki"], f["pj"], f["g"], f["e"],
+                                          f["p"], f["gf"], f["gc"], f["pts"], S.ahora()) for f in filas])
+                        print(f"  {nombre}: {len(filas)} equipos ({pagina})")
+                        break
+                    motivos.append(f"{pagina}: existe pero no se reconoció la tabla de posiciones")
+                if not cola and not buscado:      # último recurso: buscar el título en Wikipedia
+                    buscado = True
+                    cola = buscar_titulos(tipo, pats, hoy)
             else:
                 sin.append(nombre)
                 print(f"  {nombre}: sin tabla")
+                for m in motivos:
+                    print(f"      - {m}")
     if sin:
         print(f"\n{len(sin)} ligas sin tabla: {', '.join(sin)}.\n"
-              "Revisa el título del artículo en Wikipedia y ajusta su línea en LIGAS_TXT.")
+              "Revisa arriba el motivo de cada una y ajusta su línea en LIGAS_TXT.")
 
 
 def _datos():
