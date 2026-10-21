@@ -1,0 +1,31 @@
+name: Actualizar clasificación
+
+on:
+  schedule:
+    - cron: "0 11 * * *"      # todos los días, 11:00 UTC (5:00 a. m. en Ciudad de México)
+  workflow_dispatch:           # también se puede lanzar a mano desde la pestaña Actions
+
+permissions:
+  contents: write
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests beautifulsoup4 lxml
+      - name: Bajar tablas y generar la app
+        env:
+          WIKI_CONTACTO: ${{ secrets.WIKI_CONTACTO }}
+        run: |
+          python selecciones.py tablas
+          python selecciones.py web
+      - name: Publicar cambios
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@users.noreply.github.com"
+          git add docs
+          git diff --cached --quiet || (git commit -m "Actualiza clasificación" && git push)
