@@ -2,11 +2,15 @@ name: Actualizar clasificación
 
 on:
   schedule:
-    - cron: "0 */6 * * *"      # todos los días, 11:00 UTC (5:00 a. m. en Ciudad de México)
+    - cron: "0 */6 * * *"     # cada 6 horas
   workflow_dispatch:           # también se puede lanzar a mano desde la pestaña Actions
 
 permissions:
   contents: write
+
+concurrency:
+  group: actualizar
+  cancel-in-progress: false
 
 jobs:
   actualizar:
@@ -28,4 +32,8 @@ jobs:
           git config user.name "github-actions"
           git config user.email "actions@users.noreply.github.com"
           git add docs
-          git diff --cached --quiet || (git commit -m "Actualiza clasificación" && git push)
+          if ! git diff --cached --quiet; then
+            git commit -m "Actualiza clasificación"
+            git pull --rebase -X theirs origin main
+            git push
+          fi
