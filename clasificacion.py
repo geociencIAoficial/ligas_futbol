@@ -107,7 +107,7 @@ def candidatos(tipo: str, patrones: list[str], hoy: date) -> list[str]:
 
 
 def parsear_posiciones(html: str, rondas: int | None = None, prefer: str | None = None,
-                       excluir: str | None = None) -> list[dict]:
+                       excluir: str | None = None, sumar: bool = False) -> list[dict]:
     """Filas de la tabla de posiciones; ignora el resto de tablas del artículo.
 
     rondas: ligas con dos torneos por artículo (Liga MX = 1 vuelta). Se usa el torneo más
@@ -147,6 +147,10 @@ def parsear_posiciones(html: str, rondas: int | None = None, prefer: str | None 
     for _, tabla in tablas:
         for fila in tabla:
             n = fila["wiki"] or fila["equipo"]
+            if n in pos and sumar and rondas:         # temporada cerrada: Apertura + Clausura
+                for c in ("pj", "g", "e", "p", "gf", "gc", "pts"):
+                    filas[pos[n]][c] += fila[c]
+                continue
             if n in pos and not (rondas and fila["pj"]):
                 continue
             if n in pos:
@@ -155,6 +159,36 @@ def parsear_posiciones(html: str, rondas: int | None = None, prefer: str | None 
                 pos[n] = len(filas)
                 filas.append(fila)
     return filas
+
+
+SCORE = re.compile(r"^\s*(\d+)\s*[–\-−:]\s*(\d+)")
+RES_SQL = ("CREATE TABLE IF NOT EXISTS resultado_liga "
+           "(liga TEXT, local TEXT, visitante TEXT, gl INTEGER, gv INTEGER)")
+
+
+def parsear_resultados(html: str, ultima: bool = False) -> list[tuple]:
+    """Cuadro de resultados (filas = local, columnas = visitante, mismo orden de equipos)."""
+    mats = []
+    for t in S._raiz(html).find_all("table"):
+        trs = t.find_all("tr")
+        if len(trs) < 5:
+            continue
+        eq, marc = [], []
+        for tr in trs[1:]:
+            c = tr.find_all(["th", "td"])
+            a = S._enlace_jugador(c[0]) if c else None
+            eq.append(S._texto(a) if a else (S._texto(c[0]) if c else ""))
+            marc.append(c[1:])
+        n = len(eq)
+        if n < 4 or any(len(m) != n for m in marc):
+            continue
+        res = [(eq[i], eq[j], int(m[1]), int(m[2])) for i, fila in enumerate(marc)
+               for j, cel in enumerate(fila) if i != j and (m := SCORE.match(S._texto(cel)))]
+        if len(res) >= n:
+            mats.append(res)
+    if not mats:
+        return []
+    return mats[-1] if ultima else [r for m in mats for r in m]
 
 
 def html_pagina(pagina: str, refrescar: bool = False) -> str:
@@ -226,6 +260,7 @@ def cmd_tablas(args):
     sin = []
     with S.conectar() as con:
         con.execute(TABLA_SQL)
+        con.execute(RES_SQL)
         for nombre, pais, conf, tipo, pats in LIGAS:
             if pedidas and S.norm(nombre) not in pedidas:
                 continue
@@ -250,7 +285,10 @@ def cmd_tablas(args):
                         con.executemany("INSERT OR REPLACE INTO tabla_liga VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                                         [(nombre, pagina, f["equipo"], f["wiki"], f["pj"], f["g"], f["e"],
                                           f["p"], f["gf"], f["gc"], f["pts"], S.ahora()) for f in filas])
-                        print(f"  {nombre}: {len(filas)} equipos ({pagina})")
+                        con.execute("DELETE FROM resultado_liga WHERE liga=?", (nombre,))
+                        rs = [] if pagina.startswith("es:") else parsear_resultados(html, nombre in LIGAS_RONDAS)
+                        con.executemany("INSERT INTO resultado_liga VALUES (?,?,?,?,?)", [(nombre,) + r for r in rs])
+                        print(f"  {nombre}: {len(filas)} equipos, {len(rs)} resultados ({pagina})")
                         break
                     motivos.append(f"{pagina}: existe pero no se reconoció la tabla de posiciones")
                 if not cola and not buscado:      # último recurso: buscar el título en Wikipedia
@@ -268,6 +306,59 @@ def cmd_tablas(args):
               "Revisa arriba el motivo de cada una y ajusta su línea en LIGAS_TXT.")
 
 
+HIST = S.BASE_DIR / "datos_historicos.json"
+
+
+def cmd_historico(args):
+    """Tablas finales de las 5 temporadas anteriores. Solo baja lo que falta (se guarda en el repositorio)."""
+    hoy = date.today()
+    pedidas = {S.norm(x) for x in (args.ligas or [])}
+    datos = json.loads(HIST.read_text("utf-8")) if HIST.exists() else {}
+    for nombre, pais, conf, tipo, pats in LIGAS:
+        if pedidas and S.norm(nombre) not in pedidas:
+            continue
+        for k in range(1, 6):
+            h = hoy.replace(year=hoy.year - k, day=min(hoy.day, 28))
+            ano = (h.year if h.month >= 7 else h.year - 1) if tipo == "A" else h.year
+            clave = f"{nombre}|{ano}"
+            ant = datos.get(clave)
+            if ant and (ant["filas"] or (hoy - date.fromisoformat(ant["intento"])).days < 30):
+                continue
+            filas, usada = [], ""
+            for pagina in candidatos(tipo, pats, h):
+                try:
+                    html = html_pagina(pagina)
+                except RuntimeError:
+                    time.sleep(S.WIKI_PAUSA_S)
+                    continue
+                filas = parsear_posiciones(html, LIGAS_RONDAS.get(nombre), LIGAS_PREFER.get(nombre),
+                                           EXCLUIR_ES if pagina.startswith("es:") else None, sumar=True)
+                if filas:
+                    usada = pagina
+                    break
+            datos[clave] = {"pagina": usada, "intento": hoy.isoformat(),
+                            "filas": [[f["equipo"], f["pj"], f["g"], f["e"], f["p"], f["gf"], f["gc"], f["pts"]]
+                                      for f in filas]}
+            print(f"  {nombre} {ano}: {len(filas)} equipos" + (f" ({usada})" if usada else " sin tabla"))
+        HIST.write_text(json.dumps(datos, ensure_ascii=False, separators=(",", ":")), "utf-8")
+
+
+def _hist():
+    if not HIST.exists():
+        return []
+    out = []
+    for clave, v in json.loads(HIST.read_text("utf-8")).items():
+        liga, ano = clave.rsplit("|", 1)
+        out += [[liga, int(ano)] + f for f in v["filas"]]
+    return out
+
+
+def _res():
+    with S.conectar() as con:
+        con.execute(RES_SQL)
+        return [list(r) for r in con.execute("SELECT liga, local, visitante, gl, gv FROM resultado_liga")]
+
+
 def _datos():
     meta = {l[0]: l for l in LIGAS}
     with S.conectar() as con:
@@ -282,8 +373,17 @@ def _datos():
 
 
 def _html(datos, fecha, pwa=False):
-    h = (PLANTILLA.replace("__DATOS__", json.dumps(datos, ensure_ascii=False).replace("</", "<\\/"))
-         .replace("__FECHA__", fecha))
+    meta = {l[0]: [l[1], l[2]] for l in LIGAS}
+    hist, res = _hist(), _res()
+    ligas = {d[1] for d in datos} | {h[0] for h in hist} | {r[0] for r in res}
+    lm = {l: meta.get(l, ["", ""]) for l in sorted(ligas)}
+    hoy = date.today()
+    ini = hoy.year if hoy.month >= 7 else hoy.year - 1
+
+    def j(x):
+        return json.dumps(x, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
+    h = (PLANTILLA.replace("__DATOS__", j(datos)).replace("__HIST__", j(hist)).replace("__RES__", j(res))
+         .replace("__LM__", j(lm)).replace("__FECHA__", fecha).replace("__TEMP__", f"{ini}/{str(ini + 1)[2:]}"))
     return h.replace("__PWA_HEAD__", PWA_HEAD if pwa else "").replace("__PWA_JS__", PWA_JS if pwa else "")
 
 
@@ -376,22 +476,35 @@ th.on{color:var(--acc)}td.t,th.t{text-align:left}td.n{color:var(--mut);width:36p
 .pb i{display:block;height:100%;background:var(--acc)}tr:hover td{background:color-mix(in srgb,var(--bar) 35%,transparent)}
 td.e1,th.e1{position:sticky;left:0;background:var(--panel);z-index:1}td.e1{box-shadow:1px 0 0 var(--line)}
 @media(max-width:640px){body{font-size:14px}header{padding:max(20px,env(safe-area-inset-top)) 14px 4px}main{padding:8px 10px calc(30px + env(safe-area-inset-bottom))}h1{font-size:22px}th,td{padding:7px 7px}.card{padding:10px}.seg button{flex:1;padding:8px 6px}}
-.vac{padding:30px;text-align:center;color:var(--mut)}.hide{display:none}small{color:var(--mut)}
+.m{text-align:center;font-weight:700}#tabs{margin:4px 0 12px}.vac{padding:30px;text-align:center;color:var(--mut)}.hide{display:none}small{color:var(--mut)}
 </style></head><body>
 <header><h1>Clasificación mundial de clubes</h1>
 <p>Partidos de liga de la temporada en curso. Datos de Wikipedia al __FECHA__.</p></header>
 <main>
+<nav class="seg" id="tabs"><button data-t="1" aria-pressed="true">Clasificación</button><button data-t="2" aria-pressed="false" id="t2">Resultados __TEMP__</button></nav>
+<div id="v1">
 <div class="card"><div class="seg" id="modos"></div><div class="row" id="ctl"></div>
-<div class="row"><label>Buscar <input id="q" placeholder="Equipo"></label>
+<div class="row"><label>Temporada <select id="tp"></select></label>
+<label>Buscar <input id="q" placeholder="Equipo"></label>
 <label>Mínimo de partidos <input id="min" type="number" min="1" value="5"></label>
 <small>Rendimiento = puntos obtenidos entre puntos en juego (3 por partido jugado).</small></div></div>
 <div class="card tw"><table><thead id="th"></thead><tbody id="tb"></tbody></table><div id="vac" class="vac hide">Ningún equipo cumple los filtros.</div></div>
+<small>En ligas de año calendario, la temporada 2025/26 es el año 2025.</small></div>
+<div id="v2" class="hide"><div class="card"><div class="row" style="margin:0"><label>Liga <select id="rl"></select></label>
+<label>Equipo <input id="rq" placeholder="Buscar"></label><small id="rs"></small></div></div>
+<div class="card tw"><table><thead><tr><th class="t">Local</th><th style="text-align:center">Marcador</th><th class="t">Visitante</th></tr></thead><tbody id="rb"></tbody></table></div>
+<small>Cuadro de resultados de Wikipedia: no incluye fechas. Solo las ligas cuyo artículo trae ese cuadro.</small></div>
 </main>
 <script>
-const D=__DATOS__.map(r=>({k:r[1]+'|'+r[0],eq:r[0],liga:r[1],pais:r[2],conf:r[3],pj:r[4],g:r[5],e:r[6],p:r[7],gf:r[8],gc:r[9],dg:r[8]-r[9],pts:r[10],rend:r[4]?r[10]/(r[4]*3):0}));
-const LIGAS=[...new Set(D.map(d=>d.liga))].sort(),CONFS=[...new Set(D.map(d=>d.conf))].sort();
+const mk=r=>({k:r[1]+'|'+r[0],eq:r[0],liga:r[1],pais:r[2],conf:r[3],pj:r[4],g:r[5],e:r[6],p:r[7],gf:r[8],gc:r[9],dg:r[8]-r[9],pts:r[10],rend:r[4]?r[10]/(r[4]*3):0});
+const LM=__LM__,ACT=__DATOS__.map(mk),HD={},RES=__RES__;
+__HIST__.forEach(r=>{const m=LM[r[0]]||['',''];(HD[r[1]]=HD[r[1]]||[]).push(mk([r[2],r[0],m[0],m[1],r[3],r[4],r[5],r[6],r[7],r[8],r[9]]))});
+const ANOS=Object.keys(HD).map(Number).sort((a,b)=>b-a),etq=a=>a+'/'+String(a+1).slice(2);
+const LIGAS=Object.keys(LM).sort(),CONFS=[...new Set(Object.values(LM).map(v=>v[1]).filter(Boolean))].sort();
+const dat=()=>S.temp==='a'?ACT:(HD[S.temp]||[]);
+const RL=[...new Set(RES.map(r=>r[0]))].sort();let rl=RL[0];
 const COLS=[['n','#'],['eq','Equipo'],['liga','Liga'],['pj','PJ'],['g','G'],['e','E'],['p','P'],['gf','GF'],['gc','GC'],['dg','DG'],['pts','Pts'],['rend','Rendimiento']];
-const S={modo:'mundo',conf:CONFS[0],liga:LIGAS[0],cl:new Set(),ce:new Set(),ligaEq:LIGAS[0],sort:'rend',dir:-1};
+const S={modo:'mundo',conf:CONFS[0],liga:LIGAS[0],cl:new Set(),ce:new Set(),ligaEq:LIGAS[0],sort:'rend',dir:-1,temp:'a'};
 const $=i=>document.getElementById(i),opt=(a,v)=>a.map(x=>`<option${x===v?' selected':''}>${x}</option>`).join('');
 const MODOS={mundo:'Mundo',conf:'Confederación',pais:'País / liga',custom:'Personalizado'};
 function ctl(){
@@ -402,7 +515,7 @@ function ctl(){
  if(S.modo==='custom'){
   const ch=[...S.cl].map(l=>`<span class="chip">${l} (completa)<button data-rl="${l}" title="Quitar">×</button></span>`).concat(
    [...S.ce].map(k=>`<span class="chip">${k.split('|')[1]} <small>${k.split('|')[0]}</small><button data-re="${k}" title="Quitar">×</button></span>`)).join('');
-  const eqs=D.filter(d=>d.liga===S.ligaEq).sort((a,b)=>a.eq.localeCompare(b.eq));
+  const eqs=dat().filter(d=>d.liga===S.ligaEq).sort((a,b)=>a.eq.localeCompare(b.eq));
   h=`<div style="width:100%"><div class="chips">${ch||'<small>Agrega ligas completas (hasta 10) o equipos sueltos de cualquier liga.</small>'}</div></div>
   <label>Liga <select id="se">${opt(LIGAS,S.ligaEq)}</select></label>
   <button id="al" ${S.cl.size>=10?'disabled':''}>Agregar liga completa (${S.cl.size}/10)</button>
@@ -411,7 +524,7 @@ function ctl(){
  $('ctl').innerHTML=h;
 }
 function filas(){
- let r=D;
+ let r=dat();
  if(S.modo==='conf')r=r.filter(d=>d.conf===S.conf);
  if(S.modo==='pais')r=r.filter(d=>d.liga===S.liga);
  if(S.modo==='custom')r=r.filter(d=>S.cl.has(d.liga)||S.ce.has(d.k));
@@ -427,8 +540,15 @@ function pintar(){
  $('vac').classList.toggle('hide',f.length>0);
 }
 function todo(){ctl();pintar()}
+function pintarRes(){const q=$('rq').value.trim().toLowerCase();
+ const f=RES.filter(r=>r[0]===rl&&(!q||r[1].toLowerCase().includes(q)||r[2].toLowerCase().includes(q)));
+ const g=f.reduce((a,r)=>a+r[3]+r[4],0);
+ $('rs').textContent=f.length?`${f.length} partidos, ${(g/f.length).toFixed(2)} goles por partido`:'Sin resultados para esta liga.';
+ $('rb').innerHTML=f.map(r=>`<tr><td class="t">${r[1]}</td><td class="m">${r[3]} - ${r[4]}</td><td class="t">${r[2]}</td></tr>`).join('')}
 document.addEventListener('click',e=>{const t=e.target;
- if(t.dataset.m){S.modo=t.dataset.m;todo()}
+ if(t.dataset.t){const v=t.dataset.t;$('v1').classList.toggle('hide',v!=='1');$('v2').classList.toggle('hide',v!=='2');
+  document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-pressed',b===t))}
+ else if(t.dataset.m){S.modo=t.dataset.m;todo()}
  else if(t.dataset.s){const k=t.dataset.s;S.dir=S.sort===k?-S.dir:(k==='eq'||k==='liga'?1:-1);S.sort=k;pintar()}
  else if(t.dataset.rl){S.cl.delete(t.dataset.rl);todo()}
  else if(t.dataset.re){S.ce.delete(t.dataset.re);todo()}
@@ -436,7 +556,10 @@ document.addEventListener('click',e=>{const t=e.target;
  else if(t.id==='ae'){document.querySelectorAll('.pick input:checked').forEach(c=>S.ce.add(c.value));todo()}});
 document.addEventListener('change',e=>{const t=e.target;
  if(t.id==='sc'){S.conf=t.value;pintar()}else if(t.id==='sl'){S.liga=t.value;pintar()}else if(t.id==='se'){S.ligaEq=t.value;ctl()}
- else if(t.id==='min')pintar()});
-$('q').addEventListener('input',pintar);todo();
+ else if(t.id==='min')pintar();else if(t.id==='tp'){S.temp=t.value;todo()}else if(t.id==='rl'){rl=t.value;pintarRes()}});
+$('q').addEventListener('input',pintar);$('rq').addEventListener('input',pintarRes);
+$('tp').innerHTML='<option value="a">__TEMP__ (actual)</option>'+ANOS.map(a=>`<option value="${a}">${etq(a)}</option>`).join('');
+$('rl').innerHTML=opt(RL,rl);if(!RES.length)$('t2').classList.add('hide');
+todo();pintarRes();
 </script>__PWA_JS__</body></html>
 """

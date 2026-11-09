@@ -131,3 +131,14 @@ Algunas ligas (Costa Rica, Panamá, Guatemala, Honduras, Chile, Uruguay, Paragua
 ### Si una liga sigue sin tabla
 
 `tablas` imprime, bajo cada liga sin tabla, el motivo de cada título probado: "no existe" (el título está mal o el artículo no se ha creado) o "existe pero no se reconoció la tabla" (el título está bien y falla el lector). Corrige el título en `LIGAS_TXT`. Mientras tanto puedes llenar `datos_manuales.csv` (columnas `liga,equipo,pj,g,e,p,gf,gc,pts`; `pts` puede ir vacío y se calcula como 3 por victoria más empates). El nombre de la liga debe ser exactamente el de `LIGAS_TXT`, por ejemplo `Liga Nacional (Honduras)`. Las filas del CSV reemplazan a las de Wikipedia para esa liga en cada corrida, así que bórralas cuando la liga ya salga de Wikipedia.
+
+## Histórico y resultados
+
+```bash
+python selecciones.py historico                 # tablas finales de las 5 temporadas anteriores
+python selecciones.py historico --ligas "Serie A"
+```
+
+`historico` guarda en `datos_historicos.json` la tabla final de 2021/22 a 2025/26 de cada liga y solo pide a Wikipedia lo que falta. Las temporadas pasadas no cambian, así que ese archivo se sube al repositorio y las corridas siguientes no vuelven a bajarlo. La primera corrida puede tardar de 10 a 15 minutos. Si una temporada no se encuentra, lo reintenta cada 30 días. En ligas de año calendario, "2025/26" es el año 2025. En ligas con Apertura y Clausura (Liga MX, Centroamérica) se suman los dos torneos de cada temporada.
+
+`tablas` ahora guarda también el cuadro de resultados del artículo de la temporada en curso. La app los muestra en la pestaña Resultados, con un selector de liga y búsqueda por equipo. El cuadro de Wikipedia no trae fechas, así que no hay orden por jornada. Algunas ligas no lo incluyen y quedan sin resultados.
