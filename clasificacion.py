@@ -384,6 +384,8 @@ def _html(datos, fecha, pwa=False):
         return json.dumps(x, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
     h = (PLANTILLA.replace("__DATOS__", j(datos)).replace("__HIST__", j(hist)).replace("__RES__", j(res))
          .replace("__LM__", j(lm)).replace("__FECHA__", fecha).replace("__TEMP__", f"{ini}/{str(ini + 1)[2:]}"))
+    import nacionales as N
+    h = h.replace("__SEL_BTN__", N.UI_BTN).replace("__SEL_HTML__", N.UI_HTML).replace("__SEL_JS__", N.UI_JS)
     return h.replace("__PWA_HEAD__", PWA_HEAD if pwa else "").replace("__PWA_JS__", PWA_JS if pwa else "")
 
 
@@ -481,7 +483,7 @@ td.e1,th.e1{position:sticky;left:0;background:var(--panel);z-index:1}td.e1{box-s
 <header><h1>Clasificación mundial de clubes</h1>
 <p>Partidos de liga de la temporada en curso. Datos de Wikipedia al __FECHA__.</p></header>
 <main>
-<nav class="seg" id="tabs"><button data-t="1" aria-pressed="true">Clasificación</button><button data-t="2" aria-pressed="false" id="t2">Resultados __TEMP__</button></nav>
+<nav class="seg" id="tabs"><button data-t="1" aria-pressed="true">Clasificación</button><button data-t="2" aria-pressed="false" id="t2">Resultados __TEMP__</button>__SEL_BTN__</nav>
 <div id="v1">
 <div class="card"><div class="seg" id="modos"></div><div class="row" id="ctl"></div>
 <div class="row"><label>Temporada <select id="tp"></select></label>
@@ -494,6 +496,7 @@ td.e1,th.e1{position:sticky;left:0;background:var(--panel);z-index:1}td.e1{box-s
 <label>Equipo <input id="rq" placeholder="Buscar"></label><small id="rs"></small></div></div>
 <div class="card tw"><table><thead><tr><th class="t">Local</th><th style="text-align:center">Marcador</th><th class="t">Visitante</th></tr></thead><tbody id="rb"></tbody></table></div>
 <small>Cuadro de resultados de Wikipedia: no incluye fechas. Solo las ligas cuyo artículo trae ese cuadro.</small></div>
+__SEL_HTML__
 </main>
 <script>
 const mk=r=>({k:r[1]+'|'+r[0],eq:r[0],liga:r[1],pais:r[2],conf:r[3],pj:r[4],g:r[5],e:r[6],p:r[7],gf:r[8],gc:r[9],dg:r[8]-r[9],pts:r[10],rend:r[4]?r[10]/(r[4]*3):0});
@@ -546,7 +549,7 @@ function pintarRes(){const q=$('rq').value.trim().toLowerCase();
  $('rs').textContent=f.length?`${f.length} partidos, ${(g/f.length).toFixed(2)} goles por partido`:'Sin resultados para esta liga.';
  $('rb').innerHTML=f.map(r=>`<tr><td class="t">${r[1]}</td><td class="m">${r[3]} - ${r[4]}</td><td class="t">${r[2]}</td></tr>`).join('')}
 document.addEventListener('click',e=>{const t=e.target;
- if(t.dataset.t){const v=t.dataset.t;$('v1').classList.toggle('hide',v!=='1');$('v2').classList.toggle('hide',v!=='2');
+ if(t.dataset.t){const v=t.dataset.t;['1','2','3'].forEach(i=>{const e=$('v'+i);if(e)e.classList.toggle('hide',v!==i)});if(v==='3'&&window.selInit)selInit();
   document.querySelectorAll('#tabs button').forEach(b=>b.setAttribute('aria-pressed',b===t))}
  else if(t.dataset.m){S.modo=t.dataset.m;todo()}
  else if(t.dataset.s){const k=t.dataset.s;S.dir=S.sort===k?-S.dir:(k==='eq'||k==='liga'?1:-1);S.sort=k;pintar()}
@@ -561,5 +564,7 @@ $('q').addEventListener('input',pintar);$('rq').addEventListener('input',pintarR
 $('tp').innerHTML='<option value="a">__TEMP__ (actual)</option>'+ANOS.map(a=>`<option value="${a}">${etq(a)}</option>`).join('');
 $('rl').innerHTML=opt(RL,rl);if(!RES.length)$('t2').classList.add('hide');
 todo();pintarRes();
-</script>__PWA_JS__</body></html>
+</script>
+__SEL_JS__
+__PWA_JS__</body></html>
 """

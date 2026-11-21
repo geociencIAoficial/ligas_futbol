@@ -1745,6 +1745,9 @@ def main():
     p.add_argument("--ligas", nargs="*")
     p.set_defaults(f=lambda a: __import__("clasificacion").cmd_historico(a))
 
+    p = sub.add_parser("nacionales", help="datos de selecciones nacionales para la app (docs/sel/)")
+    p.set_defaults(f=lambda a: __import__("nacionales").cmd_nacionales(a))
+
     p = sub.add_parser("web", help="genera la carpeta docs/ (app instalable para GitHub Pages)")
     p.set_defaults(f=lambda a: __import__("clasificacion").cmd_web(a))
 

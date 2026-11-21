@@ -142,3 +142,25 @@ python selecciones.py historico --ligas "Serie A"
 `historico` guarda en `datos_historicos.json` la tabla final de 2021/22 a 2025/26 de cada liga y solo pide a Wikipedia lo que falta. Las temporadas pasadas no cambian, así que ese archivo se sube al repositorio y las corridas siguientes no vuelven a bajarlo. La primera corrida puede tardar de 10 a 15 minutos. Si una temporada no se encuentra, lo reintenta cada 30 días. En ligas de año calendario, "2025/26" es el año 2025. En ligas con Apertura y Clausura (Liga MX, Centroamérica) se suman los dos torneos de cada temporada.
 
 `tablas` ahora guarda también el cuadro de resultados del artículo de la temporada en curso. La app los muestra en la pestaña Resultados, con un selector de liga y búsqueda por equipo. El cuadro de Wikipedia no trae fechas, así que no hay orden por jornada. Algunas ligas no lo incluyen y quedan sin resultados.
+
+## Selecciones nacionales
+
+```bash
+python selecciones.py nacionales      # crea docs/sel/ con un JSON por selección y agregado.json
+```
+
+La pestaña Selecciones de la app tiene tres vistas: Ranking (rendimiento de todas las selecciones, con filtros de confederación, competición, rango de años y mínimo de partidos), Ficha (récord, últimos 10 partidos y lista de partidos con filtros) y Cara a cara (historial entre dos selecciones). La fuente es el repositorio martj42/international_results (licencia CC0): selecciones masculinas desde 1872, con Mundiales, eliminatorias, copas continentales, Nations League, amistosos y otros torneos. Las competiciones se agrupan en siete categorías (`GRUPOS` en `nacionales.py`); "Oficiales" son las primeras cinco.
+
+La confederación de cada selección se infiere de los torneos exclusivos de cada una (eliminatorias continentales y Nations League), usando el más reciente. Las que no juegan ninguno, como las selecciones no afiliadas a FIFA, quedan como "Otros". Los nombres en español están en `ES`; los que no están ahí salen en inglés. La app necesita servirse por web para esta pestaña: `panel.html` abierto desde el disco no la carga.
+
+### Elo, rachas y goleadores
+
+`nacionales` calcula un Elo para cada selección con la fórmula de eloratings.net (inicio en 1500, ventaja de local de 100 puntos, factor K de 60 en Mundiales a 20 en amistosos, y ajuste por diferencia de goles). Los valores pueden diferir de los publicados por ese sitio, que usa su propio historial y ajustes. La vista Elo lista el rating actual y el máximo histórico; "activas" son las que jugaron en los últimos 4 años. En la ficha y en el cara a cara hay una gráfica de la evolución del Elo.
+
+La ficha también muestra rachas y marcas (invicto más largo, victorias y derrotas seguidas, invicto actual, mayor goleada, peor derrota y récord en tandas de penales) calculadas sobre los partidos que dejan pasar los filtros activos. Los goleadores salen de `goalscorers.csv` del mismo repositorio y solo cuentan los goles que ese archivo registra, que son menos que los oficiales; sirven para comparar, no como totales.
+
+### Mapa
+
+La vista Mapa de la pestaña Selecciones muestra, para una selección, dónde ha jugado (país de la sede) o contra quién (país del rival), con un círculo por país: el tamaño es el número de partidos y el color el rendimiento. Con los filtros de competición y de años. En la vista de sedes se acumulan los kilómetros de los partidos jugados fuera del país de la selección. Son distancias aproximadas entre el centro de cada país, no entre ciudades.
+
+El mapa base sale de `mapa_mundo.json` (Natural Earth, dominio público, vía el paquete world-atlas) y debe estar junto a `selecciones.py` en el repositorio. `nacionales` lo combina con las coordenadas de cada selección y sede y escribe `docs/sel/mapa.json`. Al terminar imprime los lugares sin coordenadas, casi todos selecciones no afiliadas a FIFA (Chechenia, Kurdistán, etc.); si alguno te interesa, agrega su `[lon, lat]` en `EXTRA` dentro de `nacionales.py`. Las sedes con nombres antiguos (Yugoslavia, Zaire, Unión Soviética) se asignan al país actual en `ALIAS`.
