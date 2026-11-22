@@ -116,6 +116,72 @@ def k_de(t: str) -> int:
     return 40 if (t.endswith("qualification") or "Nations League" in t) else 30
 
 
+def _mapa_base() -> dict:
+    """Mapa base (países simplificados + centroides). Usa mapa_mundo.json si existe; si no, lo arma desde world-atlas."""
+    import math
+    import tarfile
+    f = S.BASE_DIR / "mapa_mundo.json"
+    if f.exists():
+        return json.loads(f.read_text("utf-8"))
+    r = requests.get("https://registry.npmjs.org/world-atlas/-/world-atlas-2.0.2.tgz", timeout=180)
+    r.raise_for_status()
+    with tarfile.open(fileobj=io.BytesIO(r.content), mode="r:gz") as tf:
+        t = json.load(tf.extractfile("package/countries-50m.json"))
+    sc, tr = t["transform"]["scale"], t["transform"]["translate"]
+    arcs = []
+    for a in t["arcs"]:
+        x = y = 0
+        pts = []
+        for dx, dy in a:
+            x, y = x + dx, y + dy
+            pts.append((x * sc[0] + tr[0], y * sc[1] + tr[1]))
+        arcs.append(pts)
+
+    def anillo(idx):
+        out = []
+        for i in idx:
+            q = arcs[i] if i >= 0 else arcs[~i][::-1]
+            out += q if not out else q[1:]
+        return out
+
+    def area(q):
+        return sum(q[i][0] * q[(i + 1) % len(q)][1] - q[(i + 1) % len(q)][0] * q[i][1] for i in range(len(q))) / 2
+
+    def centro(q):
+        a = area(q)
+        if abs(a) < 1e-9:
+            return q[0]
+        k = [q[i][0] * q[(i + 1) % len(q)][1] - q[(i + 1) % len(q)][0] * q[i][1] for i in range(len(q))]
+        return (sum((q[i][0] + q[(i + 1) % len(q)][0]) * k[i] for i in range(len(q))) / (6 * a),
+                sum((q[i][1] + q[(i + 1) % len(q)][1]) * k[i] for i in range(len(q))) / (6 * a))
+    K = 1000 / 360
+    d, cent = [], {}
+    for g in t["objects"]["countries"]["geometries"]:
+        n = g["properties"]["name"]
+        if n in ("Antarctica", "Fr. S. Antarctic Lands", "Heard I. and McDonald Is.", "S. Geo. and the Is.", "Siachen Glacier"):
+            continue
+        polis = [[anillo(r_) for r_ in g["arcs"]]] if g["type"] == "Polygon" else [[anillo(r_) for r_ in pl] for pl in g["arcs"]]
+        best = None
+        for pl in polis:
+            q = pl[0]
+            if best is None or abs(area(q)) > abs(area(best)):
+                best = q
+            P = [((lo + 180) * K, (84 - max(-58, min(84, la))) * K) for lo, la in q]
+            if max(x for x, _ in P) - min(x for x, _ in P) < 2.2 and max(y for _, y in P) - min(y for _, y in P) < 2.2:
+                continue
+            keep = [P[0]]
+            for pt in P[1:]:
+                if math.hypot(pt[0] - keep[-1][0], pt[1] - keep[-1][1]) >= 1.7:
+                    keep.append(pt)
+            if len(keep) >= 3:
+                d.append("M" + " ".join(f"{x:.0f} {y:.0f}" for x, y in keep) + "Z")
+        c = centro(best)
+        cent[n] = [round(c[0], 2), round(c[1], 2)]
+    m = {"b": "".join(d), "c": cent}
+    f.write_text(json.dumps(m, ensure_ascii=False, separators=(",", ":")), "utf-8")
+    return m
+
+
 def _csv(nombre: str) -> list[dict]:
     r = requests.get(BASE + nombre, headers={"User-Agent": "SeleccionesDB/0.3"}, timeout=120)
     r.raise_for_status()
@@ -201,17 +267,18 @@ def cmd_nacionales(args):
     ultimo = max(r["date"] for r in res)
     (out / "agregado.json").write_text(json.dumps(
         {"f": ultimo, "ya": ya, "g": GRUPOS, "t": agg, "P": list(paises)}, ensure_ascii=False, separators=(",", ":")), "utf-8")
-    mapa = S.BASE_DIR / "mapa_mundo.json"
-    if mapa.exists():
-        m = json.loads(mapa.read_text("utf-8"))
+    try:
+        m = _mapa_base()
+    except Exception as ex:
+        m = None
+        print(f"No se pudo obtener el mapa base: {ex}")
+    if m:
         nombres = set(agg_n for agg_n in eq) | set(paises)
         pos = {n: EXTRA.get(n) or m["c"].get(ALIAS.get(n, n)) for n in nombres}
         sin = sorted(n for n, v in pos.items() if not v)
         (out / "mapa.json").write_text(json.dumps({"b": m["b"], "p": {n: v for n, v in pos.items() if v}},
                                                   ensure_ascii=False, separators=(",", ":")), "utf-8")
         print(f"Mapa: {len(nombres) - len(sin)} lugares con coordenadas; sin coordenadas: {', '.join(sin) or 'ninguno'}")
-    else:
-        print("Falta mapa_mundo.json: la vista Mapa no tendrá datos.")
     print(f"Listo: {out}/  ({len(agg)} selecciones, {len(res)} partidos, datos al {ultimo})")
 
 
@@ -251,7 +318,7 @@ function selDraw(){document.querySelectorAll('#sv button').forEach(b=>b.setAttri
  if(SL.v==='e'){const e=SL.e;c=`<div class="card"><div class="row" style="margin:0"><label>Confederación <select id="ec"><option value="">Todas</option>${cf.map(x=>`<option${x===e.conf?' selected':''}>${x}</option>`).join('')}</select></label>
   <label><input id="ea" type="checkbox"${e.act?' checked':''}> Solo activas (últimos 4 años)</label><label>Buscar <input id="eq" value="${e.q}"></label></div></div>`}
  $('sc3').innerHTML=c+'<div id="sres"></div>';selTab()}
-function selTab(){if(SL.v==='r')rank();else if(SL.v==='e')elo();else if(SL.v==='m')Promise.all([load(SL.slug),SL.mapa?SL.mapa:fetch('sel/mapa.json').then(r=>r.ok?r.json():null).then(x=>SL.mapa=x)]).then(([j])=>mapa(j));else if(SL.v==='f')load(SL.slug).then(ficha);else Promise.all([load(SL.slug),load(SL.b)]).then(([a,b])=>h2h(a,b))}
+function selTab(){if(SL.v==='r')rank();else if(SL.v==='e')elo();else if(SL.v==='m')Promise.all([load(SL.slug),SL.mapa?SL.mapa:fetch('sel/mapa.json').then(r=>{if(!r.ok){SL.ms='HTTP '+r.status;return null}return r.json()}).catch(()=>{SL.ms='error de red';return null}).then(x=>SL.mapa=x)]).then(([j])=>mapa(j));else if(SL.v==='f')load(SL.slug).then(ficha);else Promise.all([load(SL.slug),load(SL.b)]).then(([a,b])=>h2h(a,b))}
 function rank(){const r=SL.r,q=r.q.toLowerCase();let a=[];
  for(const s in SL.d.t){const t=SL.d.t[s];if(r.conf&&t[2]!==r.conf||q&&!nm(t).toLowerCase().includes(q))continue;
   const v=[0,0,0,0,0,0];for(const y in t[3]){if(y<r.d||y>r.h)continue;for(const g in t[3][y])if(okG(+g,r.g))t[3][y][g].forEach((x,i)=>v[i]+=x)}
@@ -297,7 +364,7 @@ function h2h(j,b){const h=SL.hh,ms=j.m.filter(m=>m[1]===SL.b&&okG(j.t[m[4]][1],h
  $('sres').innerHTML=`<div class="card"><b>${nrival(SL.slug)} vs ${nrival(SL.b)}</b><div class="kp"><span><b>${a[0]}</b>Partidos</span><span><b>${a[1]}</b>Ganó ${nrival(SL.slug)}</span><span><b>${a[2]}</b>Empates</span><span><b>${a[3]}</b>Ganó ${nrival(SL.b)}</span><span><b>${a[4]}-${a[5]}</b>Goles</span></div></div>`
   +`<div class="card"><b>Evolución del Elo</b>${chart([eser(j),[nrival(SL.b),b.m.map(m=>[m[0],m[8]])]])}</div>`+lista(j,ms,h.n,'h')}
 const hav=(a,b)=>{const r=Math.PI/180,x=Math.sin((b[1]-a[1])*r/2)**2+Math.cos(a[1]*r)*Math.cos(b[1]*r)*Math.sin((b[0]-a[0])*r/2)**2;return 12742*Math.asin(Math.sqrt(x))};
-function mapa(j){const m=SL.m,mp=SL.mapa;if(!mp){$('sres').innerHTML='<p class="vac">No hay mapa publicado todavía (falta mapa_mundo.json).</p>';return}
+function mapa(j){const m=SL.m,mp=SL.mapa;if(!mp){$('sres').innerHTML=`<p class="vac">No se pudo cargar sel/mapa.json (${SL.ms||'sin respuesta'}). Revisa en Actions el paso «Selecciones nacionales».</p>`;return}
  const t=SL.d.t[SL.slug],P=SL.d.P,home=mp.p[t[0]],A={};
  j.m.filter(x=>okG(j.t[x[4]][1],m.g)&&x[0]>=m.d*10000&&x[0]<=m.h*10000+1231).forEach(x=>{
   const k=m.modo==='r'?SL.d.t[x[1]][0]:P[x[9]],a=A[k]=A[k]||{n:k,pj:0,g:0,e:0,p:0,km:0};a.pj++;if(x[2]>x[3])a.g++;else if(x[2]<x[3])a.p++;else a.e++;
