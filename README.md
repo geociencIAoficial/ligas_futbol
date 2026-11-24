@@ -164,3 +164,12 @@ La ficha también muestra rachas y marcas (invicto más largo, victorias y derro
 La vista Mapa de la pestaña Selecciones muestra, para una selección, dónde ha jugado (país de la sede) o contra quién (país del rival), con un círculo por país: el tamaño es el número de partidos y el color el rendimiento. Con los filtros de competición y de años. En la vista de sedes se acumulan los kilómetros de los partidos jugados fuera del país de la selección. Son distancias aproximadas entre el centro de cada país, no entre ciudades.
 
 El mapa base sale de `mapa_mundo.json` (Natural Earth, dominio público, vía el paquete world-atlas) y debe estar junto a `selecciones.py` en el repositorio. `nacionales` lo combina con las coordenadas de cada selección y sede y escribe `docs/sel/mapa.json`. Al terminar imprime los lugares sin coordenadas, casi todos selecciones no afiliadas a FIFA (Chechenia, Kurdistán, etc.); si alguno te interesa, agrega su `[lon, lat]` en `EXTRA` dentro de `nacionales.py`. Las sedes con nombres antiguos (Yugoslavia, Zaire, Unión Soviética) se asignan al país actual en `ALIAS`.
+
+### Tendencias
+
+La vista Tendencias de la pestaña Selecciones responde cuándo empezó el ascenso o el declive de una selección. Tiene dos modos:
+
+- **Ranking de tendencias.** Para un intervalo de años (por defecto, los últimos 10), ajusta una recta a los datos anuales de cada selección y ordena por el cambio total. Arriba quedan las que más suben y abajo las que más bajan. Se filtra por confederación, mínimo de partidos del intervalo y nombre.
+- **Una selección.** Dibuja la serie anual y la divide automáticamente en etapas de ascenso, declive o estabilidad. El corte entre etapas se busca con una segmentación en rectas (programación dinámica, con un criterio BIC que evita partir la serie en exceso). La última etapa es la tendencia actual y el año en que empezó.
+
+Se puede medir con dos métricas. El Elo usa el valor al cierre de cada año y cubre todos los partidos. El rendimiento (puntos entre puntos posibles) se calcula con una ventana de 3 años y admite filtro de competición, así que sirve para ver una tendencia solo en eliminatorias, Mundiales o amistosos. Umbrales: una etapa es ascenso o declive si la pendiente supera 8 puntos Elo por año o 1.2 puntos porcentuales por año. Los cortes son aproximados y con pocos datos anuales (selecciones que juegan poco) pueden moverse uno o dos años.
