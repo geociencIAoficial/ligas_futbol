@@ -75,6 +75,10 @@ Serbia and Montenegro=Serbia;Gold Coast=Ghana;Belgian Congo=Dem. Rep. Congo;Ceyl
 New Hebrides=Vanuatu;Nyasaland=Malawi;Portuguese Guinea=Guinea-Bissau;French Somaliland=Djibouti;Irish Free State=Ireland;
 Mandatory Palestine=Palestine;Bohemia and Moravia=Czechia;Bohemia=Czechia;Ellan Vannin=Isle of Man;Parishes of Jersey=Jersey""".replace("\n", "").split(";"))
 # entidades que no están en el mapa base: [lon, lat]
+# nombres históricos: no pintan el polígono del país actual
+HIST = {"Czechoslovakia", "Yugoslavia", "FR Yugoslavia", "German DR", "Soviet Union", "Serbia and Montenegro", "Zaïre",
+        "Bohemia", "Bohemia and Moravia", "Yemen DPR", "Yemen AR", "South Yemen", "United Arab Republic",
+        "Vietnam Republic", "North Vietnam", "Gold Coast", "Ceylon", "Malaya", "Burma", "Western Samoa", "Swaziland"}
 EXTRA = {"England": [-1.5, 52.8], "Scotland": [-4.2, 56.9], "Wales": [-3.7, 52.3], "Northern Ireland": [-6.7, 54.6],
          "Martinique": [-61, 14.65], "Guadeloupe": [-61.55, 16.25], "French Guiana": [-53.1, 3.9],
          "Réunion": [55.5, -21.1], "Mayotte": [45.15, -12.8], "Bonaire": [-68.25, 12.2], "Zanzibar": [39.2, -6.1],
@@ -122,7 +126,9 @@ def _mapa_base() -> dict:
     import tarfile
     f = S.BASE_DIR / "mapa_mundo.json"
     if f.exists():
-        return json.loads(f.read_text("utf-8"))
+        m = json.loads(f.read_text("utf-8"))
+        if "P" in m:
+            return m
     r = requests.get("https://registry.npmjs.org/world-atlas/-/world-atlas-2.0.2.tgz", timeout=180)
     r.raise_for_status()
     with tarfile.open(fileobj=io.BytesIO(r.content), mode="r:gz") as tf:
@@ -155,13 +161,13 @@ def _mapa_base() -> dict:
         return (sum((q[i][0] + q[(i + 1) % len(q)][0]) * k[i] for i in range(len(q))) / (6 * a),
                 sum((q[i][1] + q[(i + 1) % len(q)][1]) * k[i] for i in range(len(q))) / (6 * a))
     K = 1000 / 360
-    d, cent = [], {}
+    paths, cent = {}, {}
     for g in t["objects"]["countries"]["geometries"]:
         n = g["properties"]["name"]
         if n in ("Antarctica", "Fr. S. Antarctic Lands", "Heard I. and McDonald Is.", "S. Geo. and the Is.", "Siachen Glacier"):
             continue
         polis = [[anillo(r_) for r_ in g["arcs"]]] if g["type"] == "Polygon" else [[anillo(r_) for r_ in pl] for pl in g["arcs"]]
-        best = None
+        best, anillos = None, []
         for pl in polis:
             q = pl[0]
             if best is None or abs(area(q)) > abs(area(best)):
@@ -174,10 +180,12 @@ def _mapa_base() -> dict:
                 if math.hypot(pt[0] - keep[-1][0], pt[1] - keep[-1][1]) >= 1.7:
                     keep.append(pt)
             if len(keep) >= 3:
-                d.append("M" + " ".join(f"{x:.0f} {y:.0f}" for x, y in keep) + "Z")
+                anillos.append("M" + " ".join(f"{x:.0f} {y:.0f}" for x, y in keep) + "Z")
+        if anillos:
+            paths[n] = "".join(anillos)
         c = centro(best)
         cent[n] = [round(c[0], 2), round(c[1], 2)]
-    m = {"b": "".join(d), "c": cent}
+    m = {"P": paths, "c": cent}
     f.write_text(json.dumps(m, ensure_ascii=False, separators=(",", ":")), "utf-8")
     return m
 
@@ -277,7 +285,14 @@ def cmd_nacionales(args):
         nombres = set(agg_n for agg_n in eq) | set(paises)
         pos = {n: EXTRA.get(n) or m["c"].get(ALIAS.get(n, n)) for n in nombres}
         sin = sorted(n for n, v in pos.items() if not v)
-        (out / "mapa.json").write_text(json.dumps({"b": m["b"], "p": {n: v for n, v in pos.items() if v}},
+        q, usado = {}, {}
+        for sl, v in agg.items():
+            ne = ALIAS.get(v[0], v[0])
+            if v[0] not in HIST and m["P"].get(ne) and (ne not in usado or v[0] == ne):
+                q[sl], usado[ne] = ne, sl
+        for sl in [k for k, ne in q.items() if usado[ne] != k]:
+            del q[sl]
+        (out / "mapa.json").write_text(json.dumps({"P": m["P"], "p": {n: v for n, v in pos.items() if v}, "q": q},
                                                   ensure_ascii=False, separators=(",", ":")), "utf-8")
         print(f"Mapa: {len(nombres) - len(sin)} lugares con coordenadas; sin coordenadas: {', '.join(sin) or 'ninguno'}")
     print(f"Listo: {out}/  ({len(agg)} selecciones, {len(res)} partidos, datos al {ultimo})")
@@ -291,7 +306,7 @@ UI_HTML = r"""<div id="v3" class="hide">
 UI_JS = r"""<style>#sv{margin:4px 0 12px}.fc{display:inline-block;width:22px;height:22px;line-height:22px;text-align:center;border-radius:5px;color:#fff;font-weight:700;margin-right:3px}.fg{background:var(--acc)}.fe{background:#8a8f94}.fp{background:#c2483f}.kp{display:flex;gap:18px;flex-wrap:wrap;margin:8px 0}.kp b{display:block;font-size:20px}a.ft{color:var(--acc);cursor:pointer;text-decoration:underline}</style>
 <script>
 const SL={d:null,v:'r',slug:'mexico',b:'argentina',cache:{},
- r:{conf:'',g:'t',d:0,h:0,min:10,q:'',sort:'rend',dir:-1},f:{g:'t',q:'',d:1872,h:9999,s:'',n:100},hh:{g:'t',n:100},e:{conf:'',act:true,q:''},m:{modo:'s',g:'t',d:1872,h:9999},mapa:null,mA:{},T:{v:'r',m:'e',g:'t',d:0,h:0,d2:1960,h2:0,min:15,conf:'',q:'',sort:'ch',dir:-1}};
+ r:{conf:'',g:'t',d:0,h:0,min:10,q:'',sort:'rend',dir:-1},f:{g:'t',q:'',d:1872,h:9999,s:'',n:100},hh:{g:'t',n:100},e:{conf:'',act:true,q:''},m:{modo:'s',g:'t',d:1872,h:9999},mapa:null,mA:{},T:{v:'r',m:'e',g:'t',d:0,h:0,d2:1960,h2:0,min:15,conf:'',q:'',sort:'ch',dir:-1,reg:'auto'}};
 const GO=[['t','Todas'],['o','Oficiales'],['0','Mundial'],['1','Eliminatorias mundialistas'],['2','Copas continentales'],['3','Eliminatorias continentales'],['4','Nations League'],['5','Amistosos'],['6','Otros torneos']];
 const okG=(g,s)=>s==='t'||(s==='o'?g<5:+s===g),nm=t=>t[1]||t[0],fx=n=>String(n);
 const fecha=n=>{const s=fx(n);return s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6)};
@@ -318,14 +333,14 @@ function selDraw(){document.querySelectorAll('#sv button').forEach(b=>b.setAttri
   <label>Medir con <select id="tm"><option value="e"${T.m==='e'?' selected':''}>Elo (todos los partidos)</option><option value="r"${T.m==='r'?' selected':''}>Rendimiento por competición</option></select></label>
   ${T.m==='r'?`<label>Competición ${go('tg',T.g)}</label>`:''}
   <label>Desde <input id="${u?'td2':'td'}" type="number" value="${u?T.d2:T.d}"></label><label>Hasta <input id="${u?'th2':'th'}" type="number" value="${u?T.h2:T.h}"></label>
-  ${u?'':`<label>Mín. partidos <input id="tk" type="number" min="1" value="${T.min}"></label><label>Buscar <input id="tq" value="${T.q}"></label>`}</div></div>`}
+  <label>Mín. partidos <input id="tk" type="number" min="1" value="${T.min}"></label>${u?'':`<label>Buscar <input id="tq" value="${T.q}"></label>`}<label>Mapa <select id="tr">${[['auto','Automático'],['W','Mundo'],...Object.keys(REG).map(x=>[x,x])].map(([v,l])=>`<option value="${v}"${T.reg===v?' selected':''}>${l}</option>`).join('')}</select></label></div></div>`}
  if(SL.v==='m'){const m=SL.m;c=`<div class="card"><div class="row" style="margin:0"><label>Selección ${so('ms',SL.slug)}</label>
   <label>Ver <select id="mm"><option value="s"${m.modo==='s'?' selected':''}>Dónde jugó (sedes)</option><option value="r"${m.modo==='r'?' selected':''}>Contra quién (país del rival)</option></select></label>
   <label>Competición ${go('mg',m.g)}</label><label>Desde <input id="md" type="number" value="${m.d}"></label><label>Hasta <input id="mh" type="number" value="${m.h}"></label></div></div>`}
  if(SL.v==='e'){const e=SL.e;c=`<div class="card"><div class="row" style="margin:0"><label>Confederación <select id="ec"><option value="">Todas</option>${cf.map(x=>`<option${x===e.conf?' selected':''}>${x}</option>`).join('')}</select></label>
   <label><input id="ea" type="checkbox"${e.act?' checked':''}> Solo activas (últimos 4 años)</label><label>Buscar <input id="eq" value="${e.q}"></label></div></div>`}
  $('sc3').innerHTML=c+'<div id="sres"></div>';selTab()}
-function selTab(){if(SL.v==='r')rank();else if(SL.v==='e')elo();else if(SL.v==='t')tend();else if(SL.v==='m')Promise.all([load(SL.slug),SL.mapa?SL.mapa:fetch('sel/mapa.json').then(r=>{if(!r.ok){SL.ms='HTTP '+r.status;return null}return r.json()}).catch(()=>{SL.ms='error de red';return null}).then(x=>SL.mapa=x)]).then(([j])=>mapa(j));else if(SL.v==='f')load(SL.slug).then(ficha);else Promise.all([load(SL.slug),load(SL.b)]).then(([a,b])=>h2h(a,b))}
+function selTab(){if(SL.v==='r')rank();else if(SL.v==='e')elo();else if(SL.v==='t')loadMapa().then(tend);else if(SL.v==='m')Promise.all([load(SL.slug),loadMapa()]).then(([j])=>mapa(j));else if(SL.v==='f')load(SL.slug).then(ficha);else Promise.all([load(SL.slug),load(SL.b)]).then(([a,b])=>h2h(a,b))}
 function rank(){const r=SL.r,q=r.q.toLowerCase();let a=[];
  for(const s in SL.d.t){const t=SL.d.t[s];if(r.conf&&t[2]!==r.conf||q&&!nm(t).toLowerCase().includes(q))continue;
   const v=[0,0,0,0,0,0];for(const y in t[3]){if(y<r.d||y>r.h)continue;for(const g in t[3][y])if(okG(+g,r.g))t[3][y][g].forEach((x,i)=>v[i]+=x)}
@@ -370,6 +385,24 @@ function ficha(j){const f=SL.f,q=f.q.toLowerCase();
 function h2h(j,b){const h=SL.hh,ms=j.m.filter(m=>m[1]===SL.b&&okG(j.t[m[4]][1],h.g)).reverse(),a=resu(ms);
  $('sres').innerHTML=`<div class="card"><b>${nrival(SL.slug)} vs ${nrival(SL.b)}</b><div class="kp"><span><b>${a[0]}</b>Partidos</span><span><b>${a[1]}</b>Ganó ${nrival(SL.slug)}</span><span><b>${a[2]}</b>Empates</span><span><b>${a[3]}</b>Ganó ${nrival(SL.b)}</span><span><b>${a[4]}-${a[5]}</b>Goles</span></div></div>`
   +`<div class="card"><b>Evolución del Elo</b>${chart([eser(j),[nrival(SL.b),b.m.map(m=>[m[0],m[8]])]])}</div>`+lista(j,ms,h.n,'h')}
+function loadMapa(){return SL.mapa?Promise.resolve(SL.mapa):fetch('sel/mapa.json').then(r=>{if(!r.ok){SL.ms='HTTP '+r.status;return null}return r.json()}).catch(()=>{SL.ms='error de red';return null}).then(x=>SL.mapa=x)}
+const CT={Ascenso:'#2f9e5b',Declive:'#c2483f',Estable:'#8a8f94'},REG={UEFA:[-25,34,45,72],CONMEBOL:[-85,-58,-32,14],CONCACAF:[-125,5,-55,50],CAF:[-20,-36,55,38],AFC:[25,-12,150,55],OFC:[110,-50,180,10]};
+function mapaT(a,sel){const T=SL.T,mp=SL.mapa,K=1000/360;if(!mp||!mp.P)return'';const M={};a.forEach(d=>M[d.s]=d);SL.tA=M;
+ const rg=T.reg==='auto'?(sel?SL.d.t[sel][2]:T.conf):T.reg,b=REG[rg],vw=b?(b[2]-b[0])*K:1000,vb=b?`${((b[0]+180)*K).toFixed(1)} ${((84-b[3])*K).toFixed(1)} ${vw.toFixed(1)} ${((b[3]-b[1])*K).toFixed(1)}`:'0 0 1000 394';
+ const th=T.m==='e'?8:.012,op=d=>(.55+Math.min(.45,Math.abs(d.sl)/(4*th)*.45)).toFixed(2),paint={};
+ for(const s in mp.q)if(M[s])paint[mp.q[s]]=M[s];
+ const pol=Object.entries(mp.P).map(([ne,dd])=>{const d=paint[ne];return `<path d="${dd}" fill="${d?CT[d.t]:'var(--bar)'}" fill-opacity="${d?op(d):.55}" stroke="var(--line)" stroke-width=".6" vector-effect="non-scaling-stroke"${d?` data-mt="${d.s}"`:''}/>`}).join('');
+ const rr=Math.max(1.2,3.4*Math.sqrt(vw/1000)),pt=s=>{const c=mp.p[SL.d.t[s][0]];return c?`cx="${((c[0]+180)*K).toFixed(1)}" cy="${((84-c[1])*K).toFixed(1)}"`:null};
+ const mk=Object.keys(M).filter(s=>!(mp.q[s]&&mp.P[mp.q[s]])).map(s=>pt(s)?`<circle data-mt="${s}" ${pt(s)} r="${rr.toFixed(1)}" fill="${CT[M[s].t]}" stroke="#fff" stroke-width=".7" vector-effect="non-scaling-stroke"/>`:'').join('');
+ let hi='';if(sel){const ne=mp.q[sel];hi=ne&&mp.P[ne]?`<path d="${mp.P[ne]}" fill="none" stroke="var(--ink)" stroke-width="2" vector-effect="non-scaling-stroke"/>`:(pt(sel)?`<circle ${pt(sel)} r="${(rr*1.8).toFixed(1)}" fill="none" stroke="var(--ink)" stroke-width="2" vector-effect="non-scaling-stroke"/>`:'')}
+ const n=a.length,c3=Object.keys(CT).map(k=>`<span style="color:${CT[k]}">■ ${k} (${a.filter(d=>d.t===k).length})</span>`).join(' ');
+ return `<div class="card"><b>Mapa de tendencias</b> <small>${n} selecciones con datos suficientes</small><div>${c3} <span style="color:var(--mut)">■ Sin datos o fuera de la consulta</span></div>
+  <svg viewBox="${vb}" style="width:100%;height:auto;background:var(--panel)">${pol}${mk}${hi}</svg><div id="tinfo" style="min-height:22px"><small>Toca un país para ver su tendencia.</small></div></div>`}
+function tl(d,h,conf,q){const T=SL.T,m=T.m,a=[];
+ for(const s in SL.d.t){const t=SL.d.t[s];if(conf&&t[2]!==conf||q&&!nm(t).toLowerCase().includes(q))continue;
+  let pj=0;for(const y in t[3])if(+y>=d&&+y<=h)for(const g in t[3][y])if(okG(+g,m==='e'?'t':T.g))pj+=t[3][y][g][0];
+  const p=serie(t,m,T.g,d,h);if(pj<T.min||p.length<4)continue;const f=ajuste(p,m);a.push({s,n:nm(t),c:t[2],a:f.a,b:f.b,ch:f.b-f.a,sl:f.sl,t:f.t,col:f.c,pj})}
+ return a}
 function serie(t,m,g,d,h){const pts=[];d=Math.max(d,1872);
  if(m==='e'){for(const y in t[7])if(+y>=d&&+y<=h)pts.push([+y,t[7][y]]);return pts}
  for(let y=d;y<=h;y++){let pj=0,pt=0;for(let k=y-1;k<=y+1;k++){const o=t[3][k];if(!o)continue;for(const gg in o)if(okG(+gg,g)){pj+=o[gg][0];pt+=3*o[gg][1]+o[gg][2]}}
@@ -386,13 +419,10 @@ function segs(p){const n=p.length;if(n<8)return n>=3?[[0,n-1]]:[];
 function ajuste(q,m){const n=q.length,mx=q.reduce((s,a)=>s+a[0],0)/n,my=q.reduce((s,a)=>s+a[1],0)/n,sxx=q.reduce((s,a)=>s+(a[0]-mx)**2,0),sl=sxx?q.reduce((s,a)=>s+(a[0]-mx)*(a[1]-my),0)/sxx:0,th=m==='e'?8:.012;
  return {x0:q[0][0],x1:q.at(-1)[0],a:my+sl*(q[0][0]-mx),b:my+sl*(q.at(-1)[0]-mx),sl,t:sl>th?'Ascenso':sl<-th?'Declive':'Estable',c:sl>th?'var(--acc)':sl<-th?'#c2483f':'#8a8f94'}}
 const fv=(v,m)=>m==='e'?Math.round(v):(v*100).toFixed(1)+'%',fs=(v,m)=>(v>0?'+':'')+(m==='e'?Math.round(v):(v*100).toFixed(1)+' pp');
-function tend(){const T=SL.T,m=T.m;if(T.v==='u')return tendU();const q=T.q.toLowerCase();let a=[];
- for(const s in SL.d.t){const t=SL.d.t[s];if(T.conf&&t[2]!==T.conf||q&&!nm(t).toLowerCase().includes(q))continue;
-  let pj=0;for(const y in t[3])if(+y>=T.d&&+y<=T.h)for(const g in t[3][y])if(okG(+g,m==='e'?'t':T.g))pj+=t[3][y][g][0];
-  const p=serie(t,m,T.g,T.d,T.h);if(pj<T.min||p.length<4)continue;const f=ajuste(p,m);a.push({s,n:nm(t),c:t[2],a:f.a,b:f.b,ch:f.b-f.a,sl:f.sl,t:f.t,col:f.c,pj})}
+function tend(){const T=SL.T,m=T.m;if(T.v==='u')return tendU();const q=T.q.toLowerCase();const a=tl(T.d,T.h,T.conf,q);
  const k=T.sort;a.sort((x,y)=>{const c=typeof x[k]==='string'?x[k].localeCompare(y[k]):x[k]-y[k];return c?c*T.dir:y.ch-x.ch});
  const H=[['n','#'],['n','Selección'],['c','Conf.'],['a','Inicio'],['b','Fin'],['ch','Cambio'],['sl','Por año'],['t','Tendencia']];
- $('sres').innerHTML=`<div class="card tw"><table><thead><tr>${H.map(([k2,t],i)=>`<th data-ts="${i?k2:'ch'}" class="${i===1?'t e1 ':''}${i===2||i===7?'t ':''}${T.sort===k2&&i?'on':''}">${t}</th>`).join('')}</tr></thead><tbody>${a.map((d,i)=>`<tr><td class="n">${i+1}</td><td class="t e1"><a class="ft" data-tu="${d.s}">${d.n}</a></td><td class="t l">${d.c}</td><td>${fv(d.a,m)}</td><td>${fv(d.b,m)}</td><td><b>${fs(d.ch,m)}</b></td><td>${fs(d.sl,m)}</td><td class="t" style="color:${d.col}"><b>${d.t}</b></td></tr>`).join('')}</tbody></table>${a.length?'':'<div class="vac">Ninguna selección cumple los filtros.</div>'}</div>
+ $('sres').innerHTML=mapaT(a,null)+`<div class="card tw"><table><thead><tr>${H.map(([k2,t],i)=>`<th data-ts="${i?k2:'ch'}" class="${i===1?'t e1 ':''}${i===2||i===7?'t ':''}${T.sort===k2&&i?'on':''}">${t}</th>`).join('')}</tr></thead><tbody>${a.map((d,i)=>`<tr><td class="n">${i+1}</td><td class="t e1"><a class="ft" data-tu="${d.s}">${d.n}</a></td><td class="t l">${d.c}</td><td>${fv(d.a,m)}</td><td>${fv(d.b,m)}</td><td><b>${fs(d.ch,m)}</b></td><td>${fs(d.sl,m)}</td><td class="t" style="color:${d.col}"><b>${d.t}</b></td></tr>`).join('')}</tbody></table>${a.length?'':'<div class="vac">Ninguna selección cumple los filtros.</div>'}</div>
  <small>Cambio = diferencia entre el inicio y el fin de la recta ajustada a los datos anuales del intervalo. Toca los encabezados para ordenar (arriba los que más suben, abajo los que más bajan).</small>`}
 function tchart(p,ss,m){if(p.length<2)return'';const W=600,H=240,Lf=40,B=22,x0=p[0][0],x1=p.at(-1)[0],vs=p.map(a=>a[1]),e=m==='e',st=e?100:.1,
  lo=Math.floor(Math.min(...vs)/st)*st,hi=Math.ceil(Math.max(...vs)/st)*st,X=x=>Lf+(x-x0)/((x1-x0)||1)*(W-Lf-10),Y=v=>8+(hi-v)/((hi-lo)||1)*(H-8-B),xs=(x1-x0)>60?10:(x1-x0)>25?5:2;
@@ -404,7 +434,7 @@ function tendU(){const T=SL.T,m=T.m,t=SL.d.t[SL.slug],p=serie(t,m,T.g,T.d2,T.h2)
  if(p.length<4){$('sres').innerHTML='<p class="vac">Muy pocos datos en ese intervalo para detectar una tendencia.</p>';return}
  const ss=segs(p).map(([i,j])=>ajuste(p.slice(i,j+1),m)),u=ss.at(-1);
  $('sres').innerHTML=`<div class="card"><b>${nrival(SL.slug)}</b>: ${m==='e'?'Elo de cierre de cada año':'rendimiento (ventana de 3 años)'}<div class="kp"><span><b style="color:${u.c}">${u.t}</b>Tendencia actual (desde ${u.x0})</span><span><b>${fs(u.sl,m)}</b>por año</span><span><b>${ss.length}</b>etapas detectadas</span></div>
-  ${tchart(p,ss,m)}<small>Puntos grises: dato anual. Rectas: etapas detectadas automáticamente (verde asciende, rojo declina, gris estable). Los cortes son aproximados.</small></div>
+  ${tchart(p,ss,m)}<small>Puntos grises: dato anual. Rectas: etapas detectadas automáticamente (verde asciende, rojo declina, gris estable). Los cortes son aproximados.</small></div>${mapaT(tl(T.d2,T.h2,'',''),SL.slug)}
   <div class="card tw"><table><thead><tr><th class="t">Etapa</th><th class="t">Tendencia</th><th>Por año</th><th>Cambio</th><th>De → A</th></tr></thead><tbody>${ss.map(s=>`<tr><td class="t">${s.x0}–${s.x1}</td><td class="t" style="color:${s.c}"><b>${s.t}</b></td><td>${fs(s.sl,m)}</td><td>${fs(s.b-s.a,m)}</td><td>${fv(s.a,m)} → ${fv(s.b,m)}</td></tr>`).join('')}</tbody></table></div>`}
 const hav=(a,b)=>{const r=Math.PI/180,x=Math.sin((b[1]-a[1])*r/2)**2+Math.cos(a[1]*r)*Math.cos(b[1]*r)*Math.sin((b[0]-a[0])*r/2)**2;return 12742*Math.asin(Math.sqrt(x))};
 function mapa(j){const m=SL.m,mp=SL.mapa;if(!mp){$('sres').innerHTML=`<p class="vac">No se pudo cargar sel/mapa.json (${SL.ms||'sin respuesta'}). Revisa en Actions el paso «Selecciones nacionales».</p>`;return}
@@ -418,10 +448,11 @@ function mapa(j){const m=SL.m,mp=SL.mapa;if(!mp){$('sres').innerHTML=`<p class="
  const ho=home?`<circle cx="${((home[0]+180)*1000/360).toFixed(1)}" cy="${((84-home[1])*1000/360).toFixed(1)}" r="2" fill="none" stroke="var(--ink)" stroke-width="1.2"/>`:'';
  $('sres').innerHTML=`<div class="card"><b>${nrival(SL.slug)}: ${m.modo==='s'?'dónde jugó':'contra quién jugó'}</b><div class="kp"><span><b>${tot}</b>Partidos</span><span><b>${L.length}</b>${m.modo==='s'?'Países sede':'Países rivales'}</span>${m.modo==='s'?`<span><b>${fuera}</b>Fuera del país</span><span><b>${Math.round(km).toLocaleString('es')}</b>km acumulados</span>${far?`<span><b>${far.n}</b>Más lejos (${Math.round(hav(home,mp.p[far.n])).toLocaleString('es')} km)</span>`:''}`:''}</div>
   <small>Tamaño = partidos; color = rendimiento (rojo a verde). Toca un círculo.</small>
-  <svg viewBox="0 0 1000 394" style="width:100%;height:auto;background:var(--panel)"><path d="${mp.b}" fill="var(--bar)" stroke="var(--line)" stroke-width=".5"/>${cir}${ho}</svg><div id="minfo" style="min-height:22px"></div></div>
+  <svg viewBox="0 0 1000 394" style="width:100%;height:auto;background:var(--panel)"><path d="${Object.values(mp.P).join('')}" fill="var(--bar)" stroke="var(--line)" stroke-width=".5"/>${cir}${ho}</svg><div id="minfo" style="min-height:22px"></div></div>
   <div class="card tw"><table><thead><tr><th class="t">${m.modo==='s'?'País sede':'País rival'}</th><th>PJ</th><th>G</th><th>E</th><th>P</th>${m.modo==='s'?'<th>km (aprox.)</th>':''}</tr></thead><tbody>${L.slice(0,15).map(a=>`<tr><td class="t"><b>${a.n}</b></td><td>${a.pj}</td><td>${a.g}</td><td>${a.e}</td><td>${a.p}</td>${m.modo==='s'?`<td>${a.n===t[0]?'—':Math.round(a.km).toLocaleString('es')}</td>`:''}</tr>`).join('')}</tbody></table></div>
   <small>Las distancias se estiman entre el centro de cada país, no entre ciudades.</small>`}
 function selClick(e){const t=e.target;
+ if(t.dataset.mt){const d=SL.tA[t.dataset.mt],m=SL.T.m;$('tinfo').innerHTML=`<b>${d.n}</b>: <span style="color:${CT[d.t]}"><b>${d.t}</b></span> (${fs(d.sl,m)} por año; ${fv(d.a,m)} → ${fv(d.b,m)}; ${d.pj} partidos)`;return}
  if(t.dataset.tv){SL.T.v=t.dataset.tv;selDraw();return}
  if(t.dataset.tu){SL.slug=t.dataset.tu;SL.T.v='u';selDraw();return}
  if(t.dataset.ts){const k=t.dataset.ts;SL.T.dir=SL.T.sort===k?-SL.T.dir:(k==='n'||k==='c'||k==='t'?1:-1);SL.T.sort=k;tend();return}
@@ -433,6 +464,6 @@ function selClick(e){const t=e.target;
 function selChange(e){const t=e.target,i=t.id,v=t.value,r=SL.r,f=SL.f;
  if(i==='rc')r.conf=v;else if(i==='rg')r.g=v;else if(i==='rd')r.d=+v||0;else if(i==='rh')r.h=+v||9999;else if(i==='rm')r.min=+v||1;else if(i==='rq')r.q=v;
  else if(i==='fs')SL.slug=v;else if(i==='fg')f.g=v;else if(i==='fq')f.q=v;else if(i==='fd')f.d=+v||1872;else if(i==='fh')f.h=+v||9999;else if(i==='fv')f.s=v;
- else if(i==='tn')SL.slug=v;else if(i==='tm'){SL.T.m=v;selDraw();return}else if(i==='tg')SL.T.g=v;else if(i==='tc')SL.T.conf=v;else if(i==='td')SL.T.d=+v||1872;else if(i==='th')SL.T.h=+v||9999;else if(i==='td2')SL.T.d2=+v||1872;else if(i==='th2')SL.T.h2=+v||9999;else if(i==='tk')SL.T.min=+v||1;else if(i==='tq')SL.T.q=v;else if(i==='ms')SL.slug=v;else if(i==='mm')SL.m.modo=v;else if(i==='mg')SL.m.g=v;else if(i==='md')SL.m.d=+v||1872;else if(i==='mh')SL.m.h=+v||9999;else if(i==='ec')SL.e.conf=v;else if(i==='ea')SL.e.act=t.checked;else if(i==='eq')SL.e.q=v;else if(i==='ha')SL.slug=v;else if(i==='hb')SL.b=v;else if(i==='hg')SL.hh.g=v;else return;
+ else if(i==='tn')SL.slug=v;else if(i==='tr')SL.T.reg=v;else if(i==='tm'){SL.T.m=v;selDraw();return}else if(i==='tg')SL.T.g=v;else if(i==='tc')SL.T.conf=v;else if(i==='td')SL.T.d=+v||1872;else if(i==='th')SL.T.h=+v||9999;else if(i==='td2')SL.T.d2=+v||1872;else if(i==='th2')SL.T.h2=+v||9999;else if(i==='tk')SL.T.min=+v||1;else if(i==='tq')SL.T.q=v;else if(i==='ms')SL.slug=v;else if(i==='mm')SL.m.modo=v;else if(i==='mg')SL.m.g=v;else if(i==='md')SL.m.d=+v||1872;else if(i==='mh')SL.m.h=+v||9999;else if(i==='ec')SL.e.conf=v;else if(i==='ea')SL.e.act=t.checked;else if(i==='eq')SL.e.q=v;else if(i==='ha')SL.slug=v;else if(i==='hb')SL.b=v;else if(i==='hg')SL.hh.g=v;else return;
  f.n=100;SL.hh.n=100;selTab()}
 </script>"""
